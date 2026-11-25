@@ -9,7 +9,7 @@ Een simpele shelf voor macOS: leg bestanden tijdelijk in een bakje en sleep ze e
 ./build.sh --install  # zet hem in /Applications en start hem opnieuw
 ```
 
-Nodig: de Swift-compiler (Xcode Command Line Tools). De Suisse Intl-font wordt bij het bouwen uit `~/Documents/Projecten/Servers/omelette-shop/static/fonts` gehaald en zit niet in deze repo.
+Nodig: de Swift-compiler (Xcode Command Line Tools). De Suisse Intl-font wordt bij het bouwen uit `~/Documents/Projecten/Servers/mijn-omelette/static/fonts` (of de Omelette-site in de Hugo-map) gehaald en zit niet in deze repo. Zonder die font gebruikt Bakje het systeemlettertype.
 
 ## Wat het kan
 

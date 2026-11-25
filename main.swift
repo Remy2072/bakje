@@ -161,6 +161,58 @@ enum Thumbs {
     }
 }
 
+enum Zipper {
+    static func zip(_ urls: [URL], done: @escaping @MainActor (Result<URL, Error>) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { try make(urls) }
+            DispatchQueue.main.async { MainActor.assumeIsolated { done(result) } }
+        }
+    }
+
+    static func make(_ urls: [URL]) throws -> URL {
+        let fm = FileManager.default
+        let folder = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Bakje/Archief", isDirectory: true)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        let base = urls.count == 1 ? urls[0].lastPathComponent : "Archief"
+        var out = folder.appendingPathComponent(base + ".zip")
+        var n = 2
+        while fm.fileExists(atPath: out.path) {
+            out = folder.appendingPathComponent("\(base) \(n).zip")
+            n += 1
+        }
+        let stage = fm.temporaryDirectory.appendingPathComponent("bakje-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: stage, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: stage) }
+        var names: [String] = []
+        for url in urls {
+            let stem = url.deletingPathExtension().lastPathComponent
+            let ext = url.pathExtension.isEmpty ? "" : "." + url.pathExtension
+            var name = url.lastPathComponent
+            var k = 2
+            while names.contains(name) {
+                name = "\(stem) \(k)\(ext)"
+                k += 1
+            }
+            names.append(name)
+            try fm.createSymbolicLink(at: stage.appendingPathComponent(name), withDestinationURL: url)
+        }
+        let zip = Process()
+        zip.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+        zip.currentDirectoryURL = stage
+        zip.arguments = ["-r", "-q", "-X", out.path] + names + ["-x", "*.DS_Store", "*/__MACOSX/*"]
+        zip.standardOutput = FileHandle.nullDevice
+        zip.standardError = FileHandle.nullDevice
+        try zip.run()
+        zip.waitUntilExit()
+        guard zip.terminationStatus == 0, fm.fileExists(atPath: out.path) else {
+            try? fm.removeItem(at: out)
+            throw CocoaError(.fileWriteUnknown)
+        }
+        return out
+    }
+}
+
 func popUp(_ menu: NSMenu, under button: NSView) {
     menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button)
 }
@@ -1008,14 +1060,59 @@ final class ShelfView: NSView {
         popUp(menu, under: sender)
     }
 
+    private var zipping = false
+
+    @objc func zipAll() {
+        let urls = previewURLs
+        guard !urls.isEmpty, !zipping else { return }
+        zipping = true
+        count.set("Inpakken…", fill: Brand.knopZacht, dot: nil)
+        count.clickable = false
+        Zipper.zip(urls) { [weak self] result in
+            guard let self else { return }
+            self.zipping = false
+            switch result {
+            case .success(let zip):
+                self.tiles.filter { urls.contains($0.url) }.forEach(self.remove)
+                self.add(zip)
+            case .failure(let error):
+                self.refresh()
+                NSApp.activate()
+                NSAlert(error: error).runModal()
+            }
+        }
+    }
+
+    @objc func trashAll() {
+        NSWorkspace.shared.recycle(previewURLs) { trashed, error in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { [weak self] in
+                    guard let self else { return }
+                    self.tiles.filter { trashed[$0.url] != nil }.forEach(self.remove)
+                    if !trashed.isEmpty {
+                        NSSound(contentsOfFile: "/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/finder/move to trash.aif",
+                                byReference: true)?.play()
+                    }
+                    if error != nil { NSSound.beep() }
+                }
+            }
+        }
+    }
+
     @objc func revealAll() { NSWorkspace.shared.activateFileViewerSelecting(tiles.map(\.url)) }
     @objc func emptyShelf() { clear() }
 
     @objc func showMenu(_ sender: NSButton) {
         let menu = NSMenu()
         if !tiles.isEmpty {
+            let zipTitle = tiles.count == 1 ? "Comprimeer tot zip" : "Comprimeer \(tiles.count) bestanden tot zip"
+            let zipItem = NSMenuItem(title: zipTitle, action: zipping ? nil : #selector(zipAll), keyEquivalent: "")
+            zipItem.target = self
+            menu.addItem(zipItem)
             menu.addItem(withTitle: "Toon alles in Finder", action: #selector(revealAll), keyEquivalent: "").target = self
             menu.addItem(withTitle: "Maak Bakje leeg", action: #selector(emptyShelf), keyEquivalent: "").target = self
+            let trashTitle = tiles.count == 1 ? "Verplaats naar prullenmand" : "Verplaats alle \(tiles.count) naar prullenmand"
+            menu.addItem(withTitle: trashTitle, action: #selector(trashAll), keyEquivalent: "").target = self
             menu.addItem(.separator())
         }
         menu.addItem(withTitle: "Stop Bakje", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "").target = NSApplication.shared

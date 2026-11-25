@@ -5,8 +5,13 @@ APP=build.noindex/Bakje.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 swiftc -O main.swift -o "$APP/Contents/MacOS/Bakje"
-FONTS=~/Documents/Projecten/Servers/omelette-shop/static/fonts
-cp "$FONTS"/SuisseIntl-Regular.woff2 "$APP/Contents/Resources/"
+FONT=$(ls ~/Documents/Projecten/Servers/mijn-omelette/static/fonts/SuisseIntl-Regular.woff2 \
+  ~/Documents/Projecten/Hugo/omelette-du-fromage/static/fonts/SuisseIntl-Regular.woff2 2>/dev/null | head -1 || true)
+if [[ -n "$FONT" ]]; then
+  cp "$FONT" "$APP/Contents/Resources/"
+else
+  echo "Let op: Suisse Intl niet gevonden, Bakje gebruikt het systeemlettertype"
+fi
 if [[ ! -f AppIcon.icns ]]; then
   TMP=$(mktemp -d)
   swiftc icon.swift -o "$TMP/makeicon"
